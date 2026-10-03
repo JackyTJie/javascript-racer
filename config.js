@@ -30,12 +30,14 @@ window.RACER_CONFIG = {
   // card before the race starts.
   team: {
     // Shown in large letters on the title card and in the browser tab.
-    title:                 'JavaScript Racer',
+    title:                 'GC Racing Game',
 
-    // Add your own name on its own line. Keep every name - do not delete
-    // anyone else's when you resolve the conflict!
+    // One line each, printed under the title on the title card. Add your own
+    // name on its own line. Keep every name - do not delete anyone else's when
+    // you resolve the conflict!
     authors: [
-      'Add your name here',
+      'GitWksp26Fa Group Project',
+      // add your name below this line
     ],
 
     // One shared multiplier for the whole game's "busy-ness". It scales the
