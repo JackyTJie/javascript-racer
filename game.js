@@ -1216,6 +1216,7 @@ var DIFF = DIFFICULTY.normal;   // replaced in applyConfig
 
       var box = document.createElement('div');
       box.id = 'fps';
+      box.innerHTML = '-- fps';
       document.body.appendChild(box);
 
       var frames = 0;
