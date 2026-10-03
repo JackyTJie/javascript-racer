@@ -29,14 +29,12 @@ everyone's work still in it, the authors' names on the title card, and a tag
 
     git clone <repository-url> racer
     cd racer
-    python3 -m http.server 8000        # then open http://localhost:8000/
 
-Click the title card to start. Arrow keys or W A S D to drive.
+Open `index.html` — double-click it, there is nothing to install. Click the title
+card to start. Arrow keys or W A S D to drive.
 
-> **Use a server, not a double-click.** Opening the file directly works fine, but
-> when `config.js` has a syntax error the browser hides the reason on a `file://`
-> page. Over `http://` it hands you the exact line number, which is the
-> difference between a two-minute fix and a twenty-minute one.
+> If you want to make debugging easier, you can try
+> `python3 -m http.server 8000` and open `http://localhost:8000/` instead.
 
 Check your name and email before you commit anything:
 

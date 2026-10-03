@@ -1,120 +1,277 @@
-Javascript Pseudo 3D Racer
-==========================
+# GC Racing Game — GitWksp26Fa Group Project
 
-An Outrun-style pseudo-3d racing game in HTML5 and Javascript, by
-[Jake Gordon](https://jakesgordon.com/writing/javascript-racer/), rearranged so
-that the whole game is controlled by a single configuration file.
+## Activity Overview
 
-**One page, one config file.** Open `index.html`, click once, and you are
-driving fullscreen. Everything about how the game looks, drives and feels lives
-in `config.js`.
+**Activity Name**: GC Racing Game, built by configuration
+**Objective**: Learn Git branch management, merge conflict resolution and team
+collaboration by turning one deliberately boring game into a playable one
+**Duration**: 1.5 hours for the core exercises, about 3 hours for all ten
+**Group Size**: 3–4 people per group
 
+You are not being asked to write a game. You are being asked to *change* one —
+and to do it as a team, on branches, in a way that survives being merged.
 
-Running it
-----------
+The starting point is a car on a straight empty road. Nothing to look at, nobody
+else on it. Everything about it — the road, the scenery, the traffic, the colours,
+the weather, how the car handles — lives in a single file, and each of you will
+own a different part of that file. Then you will merge each other's work, and
+some of those merges will conflict, on purpose. Resolving them well is the skill
+this project is actually about.
 
-Open `index.html` in a browser. That is the whole story - there is no build step,
-no package manager and no server required.
-
-A local server is still worth using, for one reason: on a `file://` page the
-browser hides the details of a broken `config.js`, and over `http://` it tells
-you the exact line number.
-
-    python3 -m http.server 8000
-    # then open http://localhost:8000/
-
-Drive with the arrow keys or W A S D. `M`-click the speaker in the corner to mute.
+The finish line: every branch merged, every conflict resolved with everyone's
+work still in it, every group member's name on the title card, and a tag `v1.0`
+on the result.
 
 
-Where the game lives
---------------------
+## Activity Preparation
 
-    index.html     the only page: a canvas, a HUD and the title card
-    config.js      >>> everything you would ever want to change <<<
-    game.js        the game itself, driven by config.js
-    common.js      the shared engine: maths, projection, rendering primitives
-    style.css      the frame around the canvas
-    images/  music/  the artwork and the soundtrack
-    legacy/        the original v4 game, kept for comparison
-    docs/          the workshop handout and the full list of settings
+### 1. Environment setup
 
+```bash
+git config --global user.name  "Your Name"
+git config --global user.email "you@example.com"
+```
 
-Two ways to run the original
-----------------------------
+Use the university address you use for the course git server — commits carry
+whoever's name and address are configured here, and a wrong one is a nuisance to
+unpick later.
 
-The repository used to hold four standalone demos - `v1.straight.html`,
-`v2.curves.html`, `v3.hills.html` and `v4.final.html`. The first three are gone
-and the fourth moved to `legacy/`. Both are one command away:
+### 2. Get the project
 
-    git show original-racer:v1.straight.html > /tmp/v1.html   # any of the four
-    open legacy/v4.final.html                                 # the original game
+```bash
+git clone <repository-url> racer
+cd racer
+```
 
-`original-racer` is a tag on the commit before any of this was rearranged, so
-deleting those files lost nothing. That is rather the point.
+Then open `index.html` in your browser — double-click it. Click the title card,
+and drive with the arrow keys or W A S D. There is nothing to install and nothing
+to build.
 
+> If you want to make debugging easier, you can try
+> `python3 -m http.server 8000` and open `http://localhost:8000/` instead: over
+> HTTP the browser names the exact line when `config.js` fails to parse, which on
+> a `file://` page it refuses to do.
 
-Settings, briefly
------------------
+### 3. Read the two documents that come with it
 
-`config.js` is commented line by line: every setting says what it does, its unit
-and its sensible range. The full reference, with the effect of each value on
-screen, is in [docs/CONFIG.md](docs/CONFIG.md).
-
-If you break a setting the game keeps running and shows a red box in the corner
-telling you which line is wrong. If you break the whole file - a missing comma, a
-leftover merge conflict marker - the page says so instead of going blank.
-
-Things worth knowing before you change them:
-
-  * **Car colour is a rotation, not a paint code.** The car artwork is drawn red,
-    and `player.hue` rotates that red: 0 is the original, 120 green, 240 blue.
-    There is no blue car in the sprite sheet to switch to.
-  * **`difficulty` multiplies, it never replaces.** On `normal` (and `custom`)
-    the numbers in the file are used exactly as written; `easy` and `hard` scale
-    them. Your value always wins on `normal`.
-  * **`fps` is deliberately not a setting.** It is the simulation timestep, and
-    top speed is derived from it, so changing it changes collision behaviour.
-  * **Track sections are 3 segments per unit of `length`**, so
-    `{ type: 'curve', length: 50 }` adds 150 segments. A track shorter than
-    `camera.drawDistance` renders wrong, and the game will tell you.
+* [`docs/WORKSHOP.md`](docs/WORKSHOP.md) — the roles, the ten exercises and the
+  git cheat sheet. This is the one to keep open.
+* [`docs/CONFIG.md`](docs/CONFIG.md) — every setting, with its unit, its range
+  and what it changes on screen.
 
 
-The workshop
-------------
+## The rules of the project
 
-This repository is the starting point for a git workshop: teams of three or four
-use branches, merges, conflicts and the undo commands to turn the deliberately
-boring baseline - a straight road, an empty roadside, nobody else on it - into a
-game of their own, editing only `config.js`.
+**One rule matters more than the rest: you only ever edit `config.js`.** That is
+the whole project. The game reads nothing else from you, and nothing else needs
+to change.
 
-The handout, the roles and the exercise list are in
-[docs/WORKSHOP.md](docs/WORKSHOP.md).
+A second rule, about how you work rather than what you change:
 
+> **Your value always wins on `normal`.** The `difficulty` setting multiplies the
+> numbers in the file, it never replaces them, so a number you typed and checked
+> is a number you get.
 
-A note on performance
----------------------
+If you break a setting, the game keeps running and puts a red box in the corner
+telling you which line is wrong. If you break the whole file — a missing comma, a
+leftover merge conflict marker — the page says so instead of going blank. You
+cannot brick this permanently; that is deliberate, because a group of people
+editing one file needs mistakes to be legible.
 
-Performance is machine and browser dependent, as it always was. Two settings do
-the heavy lifting: `viewport.maxRenderWidth` caps how many pixels are drawn (the
-old low/medium/high/fine choices were 960 / 1280 / 1920 / 2560) and
-`camera.drawDistance` caps how much of the road is drawn. `debug.showFps` puts a
-frame counter in the corner.
-
-Mobile browsers remain a poor fit for this game and there are no touch controls.
+Check the red box whenever something looks wrong. It is almost always right, and
+it names the line to go and look at.
 
 
-Credits and licence
--------------------
+## Roles
+
+Four roles, four branches, four parts of `config.js`. Agree on who is who before
+you start, because two of the exercises depend on two people wanting the same
+line.
+
+| Role | Owns | What they are building |
+|---|---|---|
+| **Driver** | `player`, `physics` | The car: its colour, its top speed, how it drifts through corners |
+| **Track Engineer** | `track` | The road: straights, curves, hills, S-bends, width, lanes |
+| **Scenery Artist** | `background`, `scenery`, `colors` | The world: sky, parallax layers, roadside trees, the whole palette |
+| **Traffic Controller** | `rivals`, `fog`, `difficulty` | The other cars, the weather, how hard it is |
+
+### The three arguments you are going to have
+
+They are not accidents. Each is a different shape of conflict, from easy to real.
+
+1. **`team.authors`** — everybody appends their own name to the same list.
+   Trivial to resolve, and it teaches you what the markers mean. It also pays
+   off: the names print on the title card, so the group can see its work.
+2. **`team.intensity`** — one multiplier over scenery density, rival count *and*
+   top speed. The Scenery Artist wants it higher to fill the world, the Traffic
+   Controller wants it lower so the track is survivable, the Driver wants it
+   higher because speed is fun. You cannot all be right. Decide together, then
+   write down one number.
+3. **`track.sections`** — two people adding sections to the same list. Small,
+   adjacent conflicts: the most common shape you will meet in real work.
+
+There is no trick to resolving any of them. Read both sides, decide what the game
+should do, delete the markers, keep the result working. What you are practising
+is the conversation, not the keystrokes.
+
+
+## Detailed Activity Process
+
+### Phase 1: Project launch (15 minutes)
+
+```bash
+git clone <repository-url>
+cd racer
+git log --oneline
+```
+
+Open `index.html`.
+
+Confirm the game runs and that it is boring: a straight road, nothing beside it,
+nobody else on it. If it looks broken you will spend the rest of the session
+assuming *you* broke it, so settle that first.
+
+### Phase 2: Individual work by role (30 minutes)
+
+Each of you takes a branch named after your role, and works only inside the part
+of `config.js` you own.
+
+```bash
+git switch -c feature/scenery      # or feature/track, feature/traffic, feature/drive-feel
+```
+
+```bash
+git status                     # what have I touched?
+git diff                       # what exactly did I change?
+git add config.js
+git commit -m "feat(scenery): thicken the roadside and add hills"
+```
+
+Commit messages follow `type(scope): what changed` — `feat`, `fix`, `docs`,
+`style`, `refactor`, `test`, `chore`, with the part of `config.js` you touched as
+the scope. Six months from now `git log --oneline` is the only documentation that
+will still be true.
+
+### Phase 3: Merge conflict experience (25 minutes)
+
+```bash
+git switch master
+git merge feature/scenery
+```
+
+If nobody has touched `master` since you branched, that is a **fast-forward**: no
+merge commit, the branch label just moves. Make a small change on `master` first
+and merge again to see the other kind — two lines of history and a merge commit
+that has to be built:
+
+```bash
+git log --graph --oneline --all --decorate
+```
+
+Sooner or later, two people edit the same line and git stops:
+
+```
+<<<<<<< HEAD
+    intensity:             1.0,
+=======
+    intensity:             2.0,
+>>>>>>> feature/traffic
+```
+
+### Phase 4: Conflict resolution (20 minutes)
+
+1. `git status` to see which files are unmerged.
+2. Open the file, find the markers.
+3. Decide what the game should do — not who wins.
+4. Delete `<<<<<<<`, `=======` and `>>>>>>>`, and leave exactly what you decided.
+5. `git add config.js`, then `git commit`.
+6. Reload the page. Does it still run?
+
+Compare each other's work before merging it, too — that is what the review
+question is for, and it is not "is this good code" but "does this do what the
+message says, and does the game still run".
+
+### Phase 5: Final integration and presentation (15 minutes)
+
+```bash
+git switch master
+git merge feature/track
+git merge feature/traffic
+git tag v1.0 -m "group build"
+git log --graph --oneline --all --decorate
+git show v1.0 --stat
+```
+
+Show the group's game, then look at the graph you just made. Every branch, every
+merge, every conflict you resolved is in that picture.
+
+
+## Activity Checklist
+
+### Preparation
+
+- [ ] Git username and email configured
+- [ ] Repository cloned, game runs, baseline confirmed boring
+- [ ] Roles assigned, one branch per person
+- [ ] `docs/WORKSHOP.md` open
+
+### Execution
+
+- [ ] All branches created
+- [ ] Each role's part of `config.js` changed and committed
+- [ ] Branches merged into `master`
+- [ ] Merge conflict met and resolved
+- [ ] Game still runs after every merge
+
+### Conclusion
+
+- [ ] Every group member's name on the title card
+- [ ] `v1.0` tagged
+- [ ] Work shown to the group
+- [ ] Branches pushed, pull requests reviewed
+
+
+## Teaching Points
+
+### Git skills
+
+1. **Branch management** — create, switch, list, delete
+2. **Merge strategies** — fast-forward versus three-way, and when each happens
+3. **Conflict resolution** — reading the markers, deciding, committing the result
+4. **Undo** — `restore`, `reset --soft/--mixed/--hard`, `stash`
+5. **History as a tool** — `log --graph`, `blame`, `bisect`
+
+### Collaboration skills
+
+1. **Communication** — agreeing on the shared number *before* you both change it
+2. **Problem solving** — a conflict is a design decision someone has to make
+3. **Quality assurance** — the config has units and ranges; out of range is a
+   defect, not a style opinion, and the game will say so
+
+
+## Repository contents
+
+```
+index.html     the only page: a canvas, a HUD and the title card
+config.js      >>> everything you are here to change <<<
+game.js        the game itself, driven by config.js
+common.js      the shared engine
+style.css      the frame around the canvas
+images/  music/
+docs/          WORKSHOP.md (the exercises) and CONFIG.md (the settings)
+tools/         pack_sprites.py - rebuilds images/sprites.png after changing
+               the individual images in images/sprites/
+legacy/        the original upstream game, kept for comparison
+```
+
+`pack_sprites.py` exists because the game loads `images/sprites.png` and not the
+individual files under `images/sprites/`, so replacing those files alone changes
+nothing. Run `python3 tools/pack_sprites.py --apply` if you have swapped artwork.
+It needs Python 3 and Pillow.
+
+
+## Copyright and licence
 
 Original game and engine by [Jake Gordon](https://github.com/jakesgordon/javascript-racer),
-[MIT](http://en.wikipedia.org/wiki/MIT_License) licensed. The section of this
-README that used to list what an unfinished racing game still needs is preserved
-in the git history - several of those ideas are now a one-line change in
-`config.js`.
-
->> NOTE: the music tracks included in this project are royalty free resources paid for and licensed
-from [Lucky Lion Studios](http://luckylionstudios.com/). They are licensed ONLY for use in this
-project and should not be reproduced.
-
->> NOTE: the sprite graphics are placeholder graphics [borrowed](http://pixel.garoux.net/game/44) from the old
-genesis version of outrun and used here as teaching examples.
+MIT licensed; music and placeholder sprite graphics remain under their own terms
+as described in the upstream repository.
