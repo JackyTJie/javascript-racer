@@ -9,49 +9,217 @@
 //=============================================================================
 
 
-    var fps            = 60;                      // how many 'update' frames per second
+//=============================================================================
+// CONFIG - read config.js and turn it into the variables the game uses
+//=============================================================================
+
+// Difficulty presets. A preset only ever MULTIPLIES the numbers you wrote in
+// config.js, so 'normal' always means "exactly my numbers".
+var DIFFICULTY = {
+  easy:   { speed: 0.75, rivals: 0.5, rivalSpeed: 0.85 },
+  normal: { speed: 1.00, rivals: 1.0, rivalSpeed: 1.00 },
+  hard:   { speed: 1.25, rivals: 2.0, rivalSpeed: 1.10 },
+  custom: { speed: 1.00, rivals: 1.0, rivalSpeed: 1.00 }
+};
+
+// Reads config.js. Every accessor remembers when it had to fall back to a
+// default or clamp a value: because the shipped config.js contains every single
+// key, a missing key is always a typo or a bad merge, never a valid choice.
+var Config = (function() {
+
+  var raw     = window.RACER_CONFIG || {};
+  var missing = [];
+  var clamped = [];
+
+  function get(path) {
+    var parts = path.split('.');
+    var node  = raw;
+    for (var i = 0 ; i < parts.length ; i++) {
+      if ((node === null) || (typeof node !== 'object') || !(parts[i] in node))
+        return undefined;
+      node = node[parts[i]];
+    }
+    return node;
+  }
+
+  function absent(path, value) {
+    if (value === undefined)
+      missing.push(path + ' is missing - using the default');
+    else
+      missing.push(path + ' is not the right kind of value - using the default');
+  }
+
+  return {
+
+    raw:     raw,
+    missing: missing,
+    clamped: clamped,
+
+    has:  function(path) { return get(path) !== undefined; },
+    path: function(path) { return get(path); },
+
+    num: function(path, def, min, max) {
+      var v = get(path);
+      if ((typeof v !== 'number') || isNaN(v)) { absent(path, v); return def; }
+      if ((min !== undefined) && (v < min)) { clamped.push(path + ' = ' + v + ' is below the minimum of ' + min); return min; }
+      if ((max !== undefined) && (v > max)) { clamped.push(path + ' = ' + v + ' is above the maximum of ' + max); return max; }
+      return v;
+    },
+
+    int: function(path, def, min, max) {
+      return Math.round(this.num(path, def, min, max));
+    },
+
+    bool: function(path, def) {
+      var v = get(path);
+      if (typeof v !== 'boolean') { absent(path, v); return def; }
+      return v;
+    },
+
+    str: function(path, def) {
+      var v = get(path);
+      if (typeof v !== 'string') { absent(path, v); return def; }
+      return v;
+    },
+
+    list: function(path, def) {
+      var v = get(path);
+      if (!(v instanceof Array)) { absent(path, v); return def; }
+      return v;
+    },
+
+    obj: function(path, def) {
+      var v = get(path);
+      if ((v === null) || (typeof v !== 'object') || (v instanceof Array)) { absent(path, v); return def; }
+      return v;
+    },
+
+    // A {road, grass, rumble, ...} block of colors, filling in anything missing.
+    colors: function(path, def) {
+      var v = get(path), out = {}, key;
+      if ((v === null) || (typeof v !== 'object') || (v instanceof Array)) { absent(path, v); v = {}; }
+      for (key in def)
+        out[key] = (typeof v[key] === 'string') ? v[key] : def[key];
+      return out;
+    },
+
+    // A color that is allowed to be switched off with null.
+    lane: function(path, def) {
+      var v = get(path);
+      if (v === null) return null;
+      if (typeof v === 'string') return v;
+      absent(path, v);
+      return def;
+    },
+
+    problems: function() { return missing.concat(clamped); }
+
+  };
+
+})();
+
+function escapeHtml(text) {
+  return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// A red box in the corner listing every setting we had to guess at. This is the
+// difference between "my config did nothing" and "config.js line 42 is wrong".
+function showProblems() {
+  var wanted = Config.bool('debug.showConfigProblems', true);
+  var problems = Config.problems();
+  if (!wanted || (problems.length === 0))
+    return;
+
+  var box = document.createElement('div');
+  box.id = 'problems';
+  var html = '<b>' + problems.length + ' problem' + (problems.length === 1 ? '' : 's') + ' in config.js</b><ul>';
+  for (var i = 0 ; i < problems.length ; i++)
+    html += '<li>' + escapeHtml(problems[i]) + '</li>';
+  box.innerHTML = html + '</ul>';
+  document.body.appendChild(box);
+}
+
+// A fatal problem we cannot drive through, like config.js not parsing at all.
+function showFatal(title, detail) {
+  var box = document.createElement('div');
+  box.id = 'problems';
+  box.className = 'fatal';
+  box.innerHTML = '<b>' + escapeHtml(title) + '</b><p>' + escapeHtml(detail) + '</p>';
+  document.body.appendChild(box);
+}
+
+(function checkConfigLoaded() {
+  if (window.RACER_CONFIG !== undefined)
+    return;
+  var boot = window.__bootError;
+  var detail = 'config.js could not be loaded';
+  if (boot && boot.message)
+    detail = 'config.js line ' + boot.line + ': ' + boot.message;
+  detail += '. If you just resolved a merge conflict, look for a leftover <<<<<<<, ======= or >>>>>>> marker in the file.';
+  showFatal('config.js is broken', detail);
+})();
+
+var cfg  = Config.raw;
+var DIFF = DIFFICULTY[Config.str('difficulty', 'normal')] || DIFFICULTY.normal;
+
+//=============================================================================
+// GAME STATE
+//=============================================================================
+
+    var fps            = 60;                      // fixed: this is the simulation timestep, and top speed is derived from it
     var step           = 1/fps;                   // how long is each frame (in seconds)
-    var width          = 1024;                    // logical canvas width
-    var height         = 768;                     // logical canvas height
-    var centrifugal    = 0.3;                     // centrifugal force multiplier when going around curves
-    var offRoadDecel   = 0.99;                    // speed multiplier when off road (e.g. you lose 2% speed each update frame)
-    var skySpeed       = 0.001;                   // background sky layer scroll speed when going around curve (or up hill)
-    var hillSpeed      = 0.002;                   // background hill layer scroll speed when going around curve (or up hill)
-    var treeSpeed      = 0.003;                   // background tree layer scroll speed when going around curve (or up hill)
-    var skyOffset      = 0;                       // current sky scroll offset
-    var hillOffset     = 0;                       // current hill scroll offset
-    var treeOffset     = 0;                       // current tree scroll offset
+    var width          = 1024;                    // logical canvas width  (replaced by the real viewport at boot)
+    var height         = 768;                     // logical canvas height (replaced by the real viewport at boot)
     var segments       = [];                      // array of road segments
     var cars           = [];                      // array of cars on the road
-    var stats          = Game.stats('fps');       // mr.doobs FPS counter
+    var stats          = Dom.get('fps') ? Game.stats('fps') : null; // mr.doobs FPS counter, when the page has a slot for it
     var canvas         = Dom.get('canvas');       // our canvas...
     var ctx            = canvas.getContext('2d'); // ...and its drawing context
     var background     = null;                    // our background image (loaded below)
     var sprites        = null;                    // our spritesheet (loaded below)
     var resolution     = null;                    // scaling factor to provide resolution independence (computed)
-    var roadWidth      = 2000;                    // actually half the roads width, easier math if the road spans from -roadWidth to +roadWidth
-    var segmentLength  = 200;                     // length of a single segment
-    var rumbleLength   = 3;                       // number of segments per red/white rumble strip
     var trackLength    = null;                    // z length of entire track (computed)
-    var lanes          = 3;                       // number of lanes
-    var fieldOfView    = 100;                     // angle (degrees) for field of view
-    var cameraHeight   = 1000;                    // z height of camera
     var cameraDepth    = null;                    // z distance camera is from screen (computed)
-    var drawDistance   = 300;                     // number of segments to draw
     var playerX        = 0;                       // player x offset from center of road (-1 to 1 to stay independent of roadWidth)
     var playerZ        = null;                    // player relative z distance from camera (computed)
-    var fogDensity     = 5;                       // exponential fog density
     var position       = 0;                       // current camera Z position (add playerZ to get player's absolute Z position)
     var speed          = 0;                       // current speed
-    var maxSpeed       = segmentLength/step;      // top speed (ensure we can't move more than 1 segment in a single frame to make collision detection easier)
-    var accel          =  maxSpeed/5;             // acceleration rate - tuned until it 'felt' right
-    var breaking       = -maxSpeed;               // deceleration rate when braking
-    var decel          = -maxSpeed/5;             // 'natural' deceleration rate when neither accelerating, nor braking
-    var offRoadDecel   = -maxSpeed/2;             // off road deceleration is somewhere in between
-    var offRoadLimit   =  maxSpeed/4;             // limit when off road deceleration no longer applies (e.g. you can always go at least this speed even when off road)
-    var totalCars      = 200;                     // total number of cars on the road
     var currentLapTime = 0;                       // current lap time
     var lastLapTime    = null;                    // last lap time
+
+    // everything from here down is filled in from config.js by applyConfig()
+    var intensity         = 1;                    // team.intensity, read once
+    var centrifugal       = 0.3;                  // centrifugal force multiplier when going around curves
+    var offRoadDecel      = -1;                   // off road deceleration
+    var offRoadLimit      = 1;                    // limit when off road deceleration no longer applies
+    var maxSpeed          = 1;                    // top speed
+    var accel             = 1;                    // acceleration rate
+    var breaking          = -1;                   // deceleration rate when braking
+    var decel             = -1;                   // 'natural' deceleration rate
+    var steerRate         = 2;                    // how fast the car moves sideways
+    var spriteCrashSpeed  = 0.2;                  // speed after hitting a roadside object
+    var roadWidth         = 2000;                 // actually half the roads width, easier math if the road spans from -roadWidth to +roadWidth
+    var segmentLength     = 200;                  // length of a single segment
+    var rumbleLength      = 3;                    // number of segments per red/white rumble strip
+    var lanes             = 3;                    // number of lanes
+    var fieldOfView       = 100;                  // angle (degrees) for field of view
+    var cameraHeight      = 1000;                 // z height of camera
+    var drawDistance      = 300;                  // number of segments to draw
+    var fogDensity        = 5;                    // exponential fog density
+    var maxOffRoad        = 3;                    // how far off the road we let the player drift
+    var rivalCount        = 200;                  // total number of cars on the road
+    var rivalLookahead    = 20;                   // how far ahead the AI looks
+    var rivalSprites      = [];                   // which vehicles the AI may drive
+    var rivalSpeedMin     = 0.25;                 // rival speeds, as a fraction of our top speed
+    var rivalSpeedMax     = 0.75;
+    var rivalSpeedMaxHeavy= 0.50;
+    var rivalCollisions   = true;                 // false = drive straight through them
+    var scenery           = { density: 1, palms: 1, columns: 1, plants: 1, billboards: 1 };
+    var backgroundLayers  = [];                   // [{image, imageName, rect, speed, wrap, offset}]
+    var trackPreset       = 'sections';
+    var trackSections     = [];
+    var hudConfig         = { enabled: true, scale: 1, showSpeed: true, showLapTime: true, showLastLap: true, showFastestLap: true, speedUnit: 'mph', speedMultiplier: 5, speedDivisor: 500 };
+    var audioConfig       = { enabled: true, volume: 0.05, loop: true, src: [] };
 
     var keyLeft        = false;
     var keyRight       = false;
@@ -75,7 +243,7 @@
       var playerSegment = findSegment(position+playerZ);
       var playerW       = SPRITES.PLAYER_STRAIGHT.w * SPRITES.SCALE;
       var speedPercent  = speed/maxSpeed;
-      var dx            = dt * 2 * speedPercent; // at top speed, should be able to cross from left to right (-1 to 1) in 1 second
+      var dx            = dt * steerRate * speedPercent; // at top speed, should be able to cross from left to right (-1 to 1) in 1 second
       var startPosition = position;
 
       updateCars(dt, playerSegment, playerW);
@@ -106,14 +274,14 @@
           sprite  = playerSegment.sprites[n];
           spriteW = sprite.source.w * SPRITES.SCALE;
           if (Util.overlap(playerX, playerW, sprite.offset + spriteW/2 * (sprite.offset > 0 ? 1 : -1), spriteW)) {
-            speed = maxSpeed/5;
+            speed = spriteCrashSpeed;
             position = Util.increase(playerSegment.p1.world.z, -playerZ, trackLength); // stop in front of sprite (at front of segment)
             break;
           }
         }
       }
 
-      for(n = 0 ; n < playerSegment.cars.length ; n++) {
+      for(n = 0 ; (n < playerSegment.cars.length) && rivalCollisions ; n++) {
         car  = playerSegment.cars[n];
         carW = car.sprite.w * SPRITES.SCALE;
         if (speed > car.speed) {
@@ -125,12 +293,11 @@
         }
       }
 
-      playerX = Util.limit(playerX, -3, 3);     // dont ever let it go too far out of bounds
+      playerX = Util.limit(playerX, -maxOffRoad, maxOffRoad); // dont ever let it go too far out of bounds
       speed   = Util.limit(speed, 0, maxSpeed); // or exceed maxSpeed
 
-      skyOffset  = Util.increase(skyOffset,  skySpeed  * playerSegment.curve * (position-startPosition)/segmentLength, 1);
-      hillOffset = Util.increase(hillOffset, hillSpeed * playerSegment.curve * (position-startPosition)/segmentLength, 1);
-      treeOffset = Util.increase(treeOffset, treeSpeed * playerSegment.curve * (position-startPosition)/segmentLength, 1);
+      for(n = 0 ; n < backgroundLayers.length ; n++)
+        backgroundLayers[n].offset = Util.increase(backgroundLayers[n].offset, backgroundLayers[n].speed * playerSegment.curve * (position-startPosition)/segmentLength, 1);
 
       if (position > playerZ) {
         if (currentLapTime && (startPosition < playerZ)) {
@@ -147,14 +314,17 @@
             Dom.removeClassName('last_lap_time', 'fastest');
           }
           updateHud('last_lap_time', formatTime(lastLapTime));
-          Dom.show('last_lap_time');
+          if (hudConfig.showLastLap) {
+            var lastLap = Dom.get('last_lap_time');
+            if (lastLap) lastLap.style.display = 'block';
+          }
         }
         else {
           currentLapTime += dt;
         }
       }
 
-      updateHud('speed',            5 * Math.round(speed/500));
+      updateHud('speed',            hudConfig.speedMultiplier * Math.round(speed/hudConfig.speedDivisor));
       updateHud('current_lap_time', formatTime(currentLapTime));
     }
 
@@ -179,7 +349,7 @@
 
     function updateCarOffset(car, carSegment, playerSegment, playerW) {
 
-      var i, j, dir, segment, otherCar, otherCarW, lookahead = 20, carW = car.sprite.w * SPRITES.SCALE;
+      var i, j, dir, segment, otherCar, otherCarW, lookahead = rivalLookahead, carW = car.sprite.w * SPRITES.SCALE;
 
       // optimization, dont bother steering around other cars when 'out of sight' of the player
       if ((carSegment.index - playerSegment.index) > drawDistance)
@@ -225,6 +395,8 @@
     //-------------------------------------------------------------------------
 
     function updateHud(key, value) { // accessing DOM can be slow, so only do it if value has changed
+      if (!hudConfig.enabled || !hud[key])
+        return;
       if (hud[key].value !== value) {
         hud[key].value = value;
         Dom.set(hud[key].dom, value);
@@ -259,11 +431,12 @@
 
       ctx.clearRect(0, 0, width, height);
 
-      Render.background(ctx, background, width, height, BACKGROUND.SKY,   skyOffset,  resolution * skySpeed  * playerY);
-      Render.background(ctx, background, width, height, BACKGROUND.HILLS, hillOffset, resolution * hillSpeed * playerY);
-      Render.background(ctx, background, width, height, BACKGROUND.TREES, treeOffset, resolution * treeSpeed * playerY);
+      for(b = 0 ; b < backgroundLayers.length ; b++) {
+        var layer = backgroundLayers[b];
+        Render.background(ctx, layer.image, width, height, layer.rect, layer.offset, resolution * layer.speed * playerY, layer.wrap);
+      }
 
-      var n, i, segment, car, sprite, spriteScale, spriteX, spriteY;
+      var n, i, b, segment, car, sprite, spriteScale, spriteX, spriteY;
 
       for(n = 0 ; n < drawDistance ; n++) {
 
@@ -351,7 +524,9 @@
     }
 
     function addSprite(n, sprite, offset) {
-      segments[n].sprites.push({ source: sprite, offset: offset });
+      n = Math.floor(n);
+      if ((n >= 0) && (n < segments.length))
+        segments[n].sprites.push({ source: sprite, offset: offset });
     }
 
     function addRoad(enter, hold, leave, curve, y) {
@@ -372,27 +547,22 @@
       CURVE:  { NONE: 0, EASY:    2, MEDIUM:    4, HARD:    6 }
     };
 
+    // The numbers below come from config.js, so a 0 really means 0 - these
+    // builders deliberately have no "sensible default" of their own.
+
     function addStraight(num) {
-      num = num || ROAD.LENGTH.MEDIUM;
       addRoad(num, num, num, 0, 0);
     }
 
     function addHill(num, height) {
-      num    = num    || ROAD.LENGTH.MEDIUM;
-      height = height || ROAD.HILL.MEDIUM;
       addRoad(num, num, num, 0, height);
     }
 
     function addCurve(num, curve, height) {
-      num    = num    || ROAD.LENGTH.MEDIUM;
-      curve  = curve  || ROAD.CURVE.MEDIUM;
-      height = height || ROAD.HILL.NONE;
       addRoad(num, num, num, curve, height);
     }
         
     function addLowRollingHills(num, height) {
-      num    = num    || ROAD.LENGTH.SHORT;
-      height = height || ROAD.HILL.LOW;
       addRoad(num, num, num,  0,                height/2);
       addRoad(num, num, num,  0,               -height);
       addRoad(num, num, num,  ROAD.CURVE.EASY,  height);
@@ -401,106 +571,135 @@
       addRoad(num, num, num,  0,                0);
     }
 
-    function addSCurves() {
-      addRoad(ROAD.LENGTH.MEDIUM, ROAD.LENGTH.MEDIUM, ROAD.LENGTH.MEDIUM,  -ROAD.CURVE.EASY,    ROAD.HILL.NONE);
-      addRoad(ROAD.LENGTH.MEDIUM, ROAD.LENGTH.MEDIUM, ROAD.LENGTH.MEDIUM,   ROAD.CURVE.MEDIUM,  ROAD.HILL.MEDIUM);
-      addRoad(ROAD.LENGTH.MEDIUM, ROAD.LENGTH.MEDIUM, ROAD.LENGTH.MEDIUM,   ROAD.CURVE.EASY,   -ROAD.HILL.LOW);
-      addRoad(ROAD.LENGTH.MEDIUM, ROAD.LENGTH.MEDIUM, ROAD.LENGTH.MEDIUM,  -ROAD.CURVE.EASY,    ROAD.HILL.MEDIUM);
-      addRoad(ROAD.LENGTH.MEDIUM, ROAD.LENGTH.MEDIUM, ROAD.LENGTH.MEDIUM,  -ROAD.CURVE.MEDIUM, -ROAD.HILL.MEDIUM);
+    function addSCurves(scale) {
+      var num = ROAD.LENGTH.MEDIUM * scale;
+      addRoad(num, num, num,  -ROAD.CURVE.EASY,    0);
+      addRoad(num, num, num,   ROAD.CURVE.MEDIUM,  ROAD.HILL.MEDIUM);
+      addRoad(num, num, num,   ROAD.CURVE.EASY,   -ROAD.HILL.LOW);
+      addRoad(num, num, num,  -ROAD.CURVE.EASY,    ROAD.HILL.MEDIUM);
+      addRoad(num, num, num,  -ROAD.CURVE.MEDIUM, -ROAD.HILL.MEDIUM);
     }
 
-    function addBumps() {
-      addRoad(10, 10, 10, 0,  5);
-      addRoad(10, 10, 10, 0, -2);
-      addRoad(10, 10, 10, 0, -5);
-      addRoad(10, 10, 10, 0,  8);
-      addRoad(10, 10, 10, 0,  5);
-      addRoad(10, 10, 10, 0, -7);
-      addRoad(10, 10, 10, 0,  5);
-      addRoad(10, 10, 10, 0, -2);
+    function addBumps(scale) {
+      var num = 10 * scale;
+      addRoad(num, num, num, 0,  5);
+      addRoad(num, num, num, 0, -2);
+      addRoad(num, num, num, 0, -5);
+      addRoad(num, num, num, 0,  8);
+      addRoad(num, num, num, 0,  5);
+      addRoad(num, num, num, 0, -7);
+      addRoad(num, num, num, 0,  5);
+      addRoad(num, num, num, 0, -2);
     }
 
     function addDownhillToEnd(num) {
-      num = num || 200;
       addRoad(num, num, num, -ROAD.CURVE.EASY, -lastY()/segmentLength);
+    }
+
+    // Turn one line of config.js's track.sections into road.
+    function addSection(s) {
+      switch (s.type) {
+        case 'straight':      addStraight(s.length);                break;
+        case 'hill':          addHill(s.length, s.hill);            break;
+        case 'curve':         addCurve(s.length, s.curve, s.hill);  break;
+        case 'rollingHills':  addLowRollingHills(s.length, s.hill); break;
+        case 'sCurves':       addSCurves(s.scale);                  break;
+        case 'bumps':         addBumps(s.scale);                    break;
+        case 'downhillToEnd': addDownhillToEnd(s.length);           break;
+      }
     }
 
     function resetRoad() {
       segments = [];
 
-      addStraight(ROAD.LENGTH.SHORT);
-      addLowRollingHills();
-      addSCurves();
-      addCurve(ROAD.LENGTH.MEDIUM, ROAD.CURVE.MEDIUM, ROAD.HILL.LOW);
-      addBumps();
-      addLowRollingHills();
-      addCurve(ROAD.LENGTH.LONG*2, ROAD.CURVE.MEDIUM, ROAD.HILL.MEDIUM);
-      addStraight();
-      addHill(ROAD.LENGTH.MEDIUM, ROAD.HILL.HIGH);
-      addSCurves();
-      addCurve(ROAD.LENGTH.LONG, -ROAD.CURVE.MEDIUM, ROAD.HILL.NONE);
-      addHill(ROAD.LENGTH.LONG, ROAD.HILL.HIGH);
-      addCurve(ROAD.LENGTH.LONG, ROAD.CURVE.MEDIUM, -ROAD.HILL.LOW);
-      addBumps();
-      addHill(ROAD.LENGTH.LONG, -ROAD.HILL.MEDIUM);
-      addStraight();
-      addSCurves();
-      addDownhillToEnd();
+      var s;
+      if (trackPreset === 'blank')
+        addStraight(200);
+      else
+        for(s = 0 ; s < trackSections.length ; s++)
+          addSection(trackSections[s]);
+
+      if (segments.length === 0)  // a track with nothing in it would be a black screen
+        addStraight(200);
 
       resetSprites();
       resetCars();
 
-      segments[findSegment(playerZ).index + 2].color = COLORS.START;
-      segments[findSegment(playerZ).index + 3].color = COLORS.START;
-      for(var n = 0 ; n < rumbleLength ; n++)
+      var start = findSegment(playerZ).index;
+      if (segments[start+2]) segments[start+2].color = COLORS.START;
+      if (segments[start+3]) segments[start+3].color = COLORS.START;
+      for(var n = 0 ; (n < rumbleLength) && (n < segments.length) ; n++)
         segments[segments.length-1-n].color = COLORS.FINISH;
 
       trackLength = segments.length * segmentLength;
     }
 
+    // Roadside objects. `scenery.density` and the four per-category numbers in
+    // config.js decide how many of each we place.
+    //
+    // IMPORTANT: density is applied by DIVIDING the distance between objects,
+    // never by multiplying the loop step. `n += 3 * 0` would never advance and
+    // the browser would freeze; `n += 3 / 0.4` grows like 3 did before.
     function resetSprites() {
       var n, i;
 
-      addSprite(20,  SPRITES.BILLBOARD07, -1);
-      addSprite(40,  SPRITES.BILLBOARD06, -1);
-      addSprite(60,  SPRITES.BILLBOARD08, -1);
-      addSprite(80,  SPRITES.BILLBOARD09, -1);
-      addSprite(100, SPRITES.BILLBOARD01, -1);
-      addSprite(120, SPRITES.BILLBOARD02, -1);
-      addSprite(140, SPRITES.BILLBOARD03, -1);
-      addSprite(160, SPRITES.BILLBOARD04, -1);
-      addSprite(180, SPRITES.BILLBOARD05, -1);
+      if (scenery.density <= 0)
+        return;
 
-      addSprite(240,                  SPRITES.BILLBOARD07, -1.2);
-      addSprite(240,                  SPRITES.BILLBOARD06,  1.2);
-      addSprite(segments.length - 25, SPRITES.BILLBOARD07, -1.2);
-      addSprite(segments.length - 25, SPRITES.BILLBOARD06,  1.2);
+      var palms      = scenery.density * scenery.palms;
+      var columns    = scenery.density * scenery.columns;
+      var plants     = scenery.density * scenery.plants;
+      var billboards = scenery.density * scenery.billboards;
 
-      for(n = 10 ; n < 200 ; n += 4 + Math.floor(n/100)) {
-        addSprite(n, SPRITES.PALM_TREE, 0.5 + Math.random()*0.5);
-        addSprite(n, SPRITES.PALM_TREE,   1 + Math.random()*2);
+      var ROW = [SPRITES.BILLBOARD07, SPRITES.BILLBOARD06, SPRITES.BILLBOARD08, SPRITES.BILLBOARD09, SPRITES.BILLBOARD01,
+                 SPRITES.BILLBOARD02, SPRITES.BILLBOARD03, SPRITES.BILLBOARD04, SPRITES.BILLBOARD05];
+
+      if (billboards > 0) {
+        var billboardStep = 20 / billboards;
+        for(n = 20, i = 0 ; n < 200 ; n += billboardStep, i++)
+          addSprite(n, ROW[i % ROW.length], -1);
+
+        addSprite(240,                  SPRITES.BILLBOARD07, -1.2);
+        addSprite(240,                  SPRITES.BILLBOARD06,  1.2);
+        addSprite(segments.length - 25, SPRITES.BILLBOARD07, -1.2);
+        addSprite(segments.length - 25, SPRITES.BILLBOARD06,  1.2);
       }
 
-      for(n = 250 ; n < 1000 ; n += 5) {
-        addSprite(n,     SPRITES.COLUMN, 1.1);
-        addSprite(n + Util.randomInt(0,5), SPRITES.TREE1, -1 - (Math.random() * 2));
-        addSprite(n + Util.randomInt(0,5), SPRITES.TREE2, -1 - (Math.random() * 2));
-      }
-
-      for(n = 200 ; n < segments.length ; n += 3) {
-        addSprite(n, Util.randomChoice(SPRITES.PLANTS), Util.randomChoice([1,-1]) * (2 + Math.random() * 5));
-      }
-
-      var side, sprite, offset;
-      for(n = 1000 ; n < (segments.length-50) ; n += 100) {
-        side      = Util.randomChoice([1, -1]);
-        addSprite(n + Util.randomInt(0, 50), Util.randomChoice(SPRITES.BILLBOARDS), -side);
-        for(i = 0 ; i < 20 ; i++) {
-          sprite = Util.randomChoice(SPRITES.PLANTS);
-          offset = side * (1.5 + Math.random());
-          addSprite(n + Util.randomInt(0, 50), sprite, offset);
+      if (palms > 0) {
+        for(n = 10 ; n < 200 ; n += Math.max(0.25, (4 + Math.floor(n/100)) / palms)) {
+          addSprite(n, SPRITES.PALM_TREE, 0.5 + Math.random()*0.5);
+          addSprite(n, SPRITES.PALM_TREE,   1 + Math.random()*2);
         }
-          
+      }
+
+      if (columns > 0) {
+        for(n = 250 ; n < 1000 ; n += Math.max(0.25, 5 / columns)) {
+          addSprite(n,     SPRITES.COLUMN, 1.1);
+          addSprite(n + Util.randomInt(0,5), SPRITES.TREE1, -1 - (Math.random() * 2));
+          addSprite(n + Util.randomInt(0,5), SPRITES.TREE2, -1 - (Math.random() * 2));
+        }
+      }
+
+      if (plants > 0) {
+        for(n = 200 ; n < segments.length ; n += Math.max(0.25, 3 / plants)) {
+          addSprite(n, Util.randomChoice(SPRITES.PLANTS), Util.randomChoice([1,-1]) * (2 + Math.random() * 5));
+        }
+      }
+
+      var side, sprite, offset, clusterStep, clusterPlants;
+      if (billboards > 0) {
+        clusterStep   = Math.max(1, 100 / billboards);
+        clusterPlants = Math.max(1, Math.round(20 * plants));
+        for(n = 1000 ; n < (segments.length-50) ; n += clusterStep) {
+          side = Util.randomChoice([1, -1]);
+          addSprite(n + Util.randomInt(0, 50), Util.randomChoice(SPRITES.BILLBOARDS), -side);
+          for(i = 0 ; i < clusterPlants ; i++) {
+            sprite = Util.randomChoice(SPRITES.PLANTS);
+            offset = side * (1.5 + Math.random());
+            addSprite(n + Util.randomInt(0, 50), sprite, offset);
+          }
+
+        }
       }
 
     }
@@ -508,11 +707,12 @@
     function resetCars() {
       cars = [];
       var n, car, segment, offset, z, sprite, speed;
-      for (var n = 0 ; n < totalCars ; n++) {
+      for (var n = 0 ; n < rivalCount ; n++) {
         offset = Math.random() * Util.randomChoice([-0.8, 0.8]);
         z      = Math.floor(Math.random() * segments.length) * segmentLength;
-        sprite = Util.randomChoice(SPRITES.CARS);
-        speed  = maxSpeed/4 + Math.random() * maxSpeed/(sprite == SPRITES.SEMI ? 4 : 2);
+        sprite = Util.randomChoice(rivalSprites);
+        var top = ((sprite === SPRITES.SEMI) || (sprite === SPRITES.TRUCK)) ? rivalSpeedMaxHeavy : rivalSpeedMax;
+        speed  = maxSpeed * (rivalSpeedMin + (Math.random() * Math.max(0, top - rivalSpeedMin)));
         car = { offset: offset, z: z, sprite: sprite, speed: speed };
         segment = findSegment(car.z);
         segment.cars.push(car);
@@ -521,12 +721,198 @@
     }
 
     //=========================================================================
+    // APPLY CONFIG
+    //=========================================================================
+
+    var SECTION_TYPES = ['straight', 'hill', 'curve', 'rollingHills', 'sCurves', 'bumps', 'downhillToEnd'];
+    var CAR_NAMES     = ['CAR01', 'CAR02', 'CAR03', 'CAR04', 'SEMI', 'TRUCK'];
+    var LAYER_SLICES  = { SKY: BACKGROUND.SKY, HILLS: BACKGROUND.HILLS, TREES: BACKGROUND.TREES };
+
+    function trackSectionsFromConfig() {
+      var raw = Config.list('track.sections', []);
+      var out = [];
+      for (var i = 0 ; i < raw.length ; i++) {
+        var s = raw[i];
+        if ((s === null) || (typeof s !== 'object')) {
+          Config.missing.push('track.sections[' + i + '] is not a section like { type: "curve", length: 50 }');
+          continue;
+        }
+        if (SECTION_TYPES.indexOf(s.type) < 0) {
+          Config.missing.push('track.sections[' + i + '] has an unknown type "' + s.type + '" - use one of ' + SECTION_TYPES.join(', '));
+          continue;
+        }
+        out.push({
+          type:   s.type,
+          length: Util.limit(Util.toFloat(s.length, 50),    10,   400),
+          curve:  Util.limit(Util.toFloat(s.curve,   0),    -6,     6),
+          hill:   Util.limit(Util.toFloat(s.hill,    0),   -60,    60),
+          scale:  Util.limit(Util.toFloat(s.scale,   1),   0.25,   4)
+        });
+      }
+      return out;
+    }
+
+    function rivalSpritesFromConfig() {
+      var names = Config.list('rivals.sprites', CAR_NAMES);
+      var out   = [];
+      for (var i = 0 ; i < names.length ; i++) {
+        if (SPRITES[names[i]])
+          out.push(SPRITES[names[i]]);
+        else
+          Config.missing.push('rivals.sprites has an unknown name "' + names[i] + '" - use any of ' + CAR_NAMES.join(', '));
+      }
+      return (out.length > 0) ? out : SPRITES.CARS;
+    }
+
+    function backgroundLayersFromConfig() {
+      var raw      = Config.list('background.layers', []);
+      var fallback = Config.str('background.image', 'background');
+      var out      = [];
+      for (var i = 0 ; i < raw.length ; i++) {
+        var l = raw[i];
+        if ((l === null) || (typeof l !== 'object')) {
+          Config.missing.push('background.layers[' + i + '] is not a layer like { slice: "SKY", speed: 0.001 }');
+          continue;
+        }
+        var rect = ((l.rect !== null) && (typeof l.rect === 'object')) ? l.rect : LAYER_SLICES[l.slice];
+        if (!rect) {
+          Config.missing.push('background.layers[' + i + '] has an unknown slice "' + l.slice + '" - use SKY, HILLS or TREES, or give it a rect {x,y,w,h}');
+          continue;
+        }
+        out.push({
+          imageName: (typeof l.image === 'string') ? l.image : fallback,
+          image:     null,
+          rect:      rect,
+          speed:     Util.limit(Util.toFloat(l.speed, 0), 0, 0.01),
+          wrap:      (l.wrap === false) ? false : true,
+          offset:    0
+        });
+      }
+      return out;
+    }
+
+    function applyConfig() {
+
+      intensity = Config.num('team.intensity', 1, 0.25, 3);
+
+      // --- the track itself -------------------------------------------------
+      segmentLength = Config.num('track.segmentLength', 200,  50,  500);
+      rumbleLength  = Config.int('track.rumbleLength',    3,   1,   20);
+      lanes         = Config.int('track.lanes',           3,   1,    6);
+      roadWidth     = Config.num('track.roadWidth',    2000, 500, 4000);
+      trackPreset   = Config.str('track.preset', 'sections');
+      trackSections = trackSectionsFromConfig();
+
+      // --- camera -----------------------------------------------------------
+      fieldOfView   = Config.num('camera.fieldOfView',   100, 40, 160);
+      cameraHeight  = Config.num('camera.height',       1000, 200, 6000);
+      drawDistance  = Config.int('camera.drawDistance',  300, 50,  600);
+      cameraDepth   = 1 / Math.tan((fieldOfView/2) * Math.PI/180);
+      playerZ       = (cameraHeight * cameraDepth);
+
+      // --- world ------------------------------------------------------------
+      fogDensity    = Config.num('fog.density', 5, 0, 30);
+      SPRITES.SCALE = 0.3 * (1/SPRITES.PLAYER_STRAIGHT.w) * Config.num('sprites.scale', 1, 0.25, 3);
+
+      // --- player and physics -----------------------------------------------
+      // Every speed is a fraction of top speed, so the numbers keep their
+      // meaning when you change segmentLength or the difficulty preset.
+      maxSpeed         = (segmentLength/step) * Config.num('physics.maxSpeedScale', 1, 0.1, 2) * DIFF.speed * intensity;
+      accel            =  maxSpeed * Config.num('physics.accel',        0.2,  0.05, 1);
+      breaking         = -maxSpeed * Config.num('physics.braking',      1.0,  0.1,  2);
+      decel            = -maxSpeed * Config.num('physics.decel',        0.2,  0.01, 1);
+      offRoadDecel     = -maxSpeed * Config.num('physics.offRoadDecel', 0.5,  0.05, 1);
+      offRoadLimit     =  maxSpeed * Config.num('physics.offRoadLimit', 0.25, 0,    1);
+      centrifugal      = Config.num('physics.centrifugal',      0.3, 0,   2);
+      steerRate        = Config.num('physics.steerRate',        2.0, 0.5, 6);
+      spriteCrashSpeed = maxSpeed * Config.num('physics.spriteCrashSpeed', 0.2, 0, 1);
+      maxOffRoad       = Config.num('player.maxOffRoad',        3,   1,   6);
+
+      // --- scenery ----------------------------------------------------------
+      scenery = {
+        density:    Config.num('scenery.density',     1, 0, 5) * intensity,
+        palms:      Config.num('scenery.palms',       1, 0, 5),
+        columns:    Config.num('scenery.columns',     1, 0, 5),
+        plants:     Config.num('scenery.plants',      1, 0, 5),
+        billboards: Config.num('scenery.billboards',  1, 0, 5)
+      };
+
+      // --- rivals -----------------------------------------------------------
+      rivalCount         = Math.round(Config.int('rivals.count', 200, 0, 1000) * DIFF.rivals * intensity);
+      rivalLookahead     = Config.int('rivals.lookahead', 20, 5, 60);
+      rivalSprites       = rivalSpritesFromConfig();
+      rivalSpeedMin      = Config.num('rivals.speedMin',      0.25, 0.05, 1);
+      rivalSpeedMax      = Config.num('rivals.speedMax',      0.75, 0.05, 1) * DIFF.rivalSpeed;
+      rivalSpeedMaxHeavy = Config.num('rivals.speedMaxHeavy', 0.50, 0.05, 1) * DIFF.rivalSpeed;
+      rivalCollisions    = Config.bool('rivals.collisions', true);
+
+      // --- colors -----------------------------------------------------------
+      COLORS.SKY        = Config.str('colors.sky', '#72D7EE');
+      COLORS.FOG        = Config.str('colors.fog', COLORS.SKY);
+      COLORS.LIGHT      = Config.colors('colors.road.light', { road: '#6B6B6B', grass: '#10AA10', rumble: '#555555' });
+      COLORS.LIGHT.lane = Config.lane('colors.road.light.lane', '#CCCCCC');
+      COLORS.DARK       = Config.colors('colors.road.dark',  { road: '#696969', grass: '#009A00', rumble: '#BBBBBB' });
+      COLORS.DARK.lane  = Config.lane('colors.road.dark.lane', null);
+      COLORS.START      = Config.colors('colors.start',  { road: 'white', grass: 'white', rumble: 'white' });
+      COLORS.FINISH     = Config.colors('colors.finish', { road: 'black', grass: 'black', rumble: 'black' });
+      canvas.style.backgroundColor = COLORS.SKY;
+
+      // --- background, hud, audio -------------------------------------------
+      background       = null;                    // resolved once the images have loaded
+      backgroundLayers = backgroundLayersFromConfig();
+
+      hudConfig = {
+        enabled:        Config.bool('hud.enabled', true),
+        scale:          Config.num('hud.scale', 1, 0.4, 3),
+        showSpeed:      Config.bool('hud.showSpeed', true),
+        showLapTime:    Config.bool('hud.showLapTime', true),
+        showLastLap:    Config.bool('hud.showLastLap', true),
+        showFastestLap: Config.bool('hud.showFastestLap', true),
+        speedUnit:      Config.str('hud.speedUnit', 'mph'),
+        speedMultiplier:Config.num('hud.speedMultiplier', 5, 0, 1000),
+        speedDivisor:   Config.num('hud.speedDivisor', 500, 1, 100000)
+      };
+
+      audioConfig = {
+        enabled: Config.bool('audio.enabled', true),
+        volume:  Config.num('audio.volume', 0.05, 0, 1),
+        loop:    Config.bool('audio.loop', true),
+        src:     Config.list('audio.src', [])
+      };
+    }
+
+    function applyHudConfig() {
+      var root = Dom.get('hud');
+      if (root) {
+        root.style.display  = hudConfig.enabled ? 'block' : 'none';
+        root.style.fontSize = (0.8 * hudConfig.scale) + 'em';
+      }
+      var visible = {
+        speed:            hudConfig.showSpeed,
+        current_lap_time: hudConfig.showLapTime,
+        last_lap_time:    false,                    // stays hidden until the first lap is done
+        fast_lap_time:    hudConfig.showFastestLap
+      };
+      for (var key in visible) {
+        var item = hud[key];
+        if (item && item.dom && item.dom.parentNode)
+          item.dom.parentNode.style.display = visible[key] ? 'block' : 'none';
+      }
+    }
+
+    //=========================================================================
     // THE GAME LOOP
     //=========================================================================
 
+    applyConfig();
+
     Game.run({
       canvas: canvas, render: render, update: update, stats: stats, step: step,
-      images: ["background", "sprites"],
+      images: imageNamesFromConfig(),
+      audio:  audioConfig,
+      error:  function(failed) {
+        showFatal('Missing image', 'Could not load: ' + failed.join(', ') + '. Check the image names in config.js.');
+      },
       keys: [
         { keys: [KEY.LEFT,  KEY.A], mode: 'down', action: function() { keyLeft   = true;  } },
         { keys: [KEY.RIGHT, KEY.D], mode: 'down', action: function() { keyRight  = true;  } },
@@ -538,65 +924,128 @@
         { keys: [KEY.DOWN,  KEY.S], mode: 'up',   action: function() { keySlower = false; } }
       ],
       ready: function(images) {
-        background = images[0];
-        sprites    = images[1];
+
+        var names  = imageNamesFromConfig();
+        var byName = {};
+        for (var n = 0 ; n < names.length ; n++)
+          byName[names[n]] = images[n];
+
+        background = byName[Config.str('background.image', 'background')];
+        sprites    = byName['sprites'];
+
+        for (var l = 0 ; l < backgroundLayers.length ; l++)
+          backgroundLayers[l].image = byName[backgroundLayers[l].imageName] || background;
+
+        tintSprites();
+
         reset();
+        applyHudConfig();
+
         Dom.storage.fast_lap_time = Dom.storage.fast_lap_time || 180;
+        showProblems();
         updateHud('fast_lap_time', formatTime(Util.toFloat(Dom.storage.fast_lap_time)));
       }
     });
 
-    function reset(options) {
-      options       = options || {};
-      canvas.width  = width  = Util.toInt(options.width,          width);
-      canvas.height = height = Util.toInt(options.height,         height);
-      lanes                  = Util.toInt(options.lanes,          lanes);
-      roadWidth              = Util.toInt(options.roadWidth,      roadWidth);
-      cameraHeight           = Util.toInt(options.cameraHeight,   cameraHeight);
-      drawDistance           = Util.toInt(options.drawDistance,   drawDistance);
-      fogDensity             = Util.toInt(options.fogDensity,     fogDensity);
-      fieldOfView            = Util.toInt(options.fieldOfView,    fieldOfView);
-      segmentLength          = Util.toInt(options.segmentLength,  segmentLength);
-      rumbleLength           = Util.toInt(options.rumbleLength,   rumbleLength);
-      cameraDepth            = 1 / Math.tan((fieldOfView/2) * Math.PI/180);
-      playerZ                = (cameraHeight * cameraDepth);
-      resolution             = height/480;
-      refreshTweakUI();
+    //=========================================================================
+    // SIZING - fill the screen, and stay sharp on a high-DPI display
+    //=========================================================================
 
-      if ((segments.length==0) || (options.segmentLength) || (options.rumbleLength))
-        resetRoad(); // only rebuild road when necessary
+    function resize() {
+
+      var cssWidth  = window.innerWidth;
+      var cssHeight = window.innerHeight;
+
+      if (Config.bool('viewport.letterbox', false)) {   // keep the classic 4:3 shape
+        cssWidth  = Math.min(cssWidth, cssHeight * 4/3);
+        cssHeight = cssWidth * 3/4;
+      }
+
+      var maxWidth   = Config.num('viewport.maxRenderWidth', 1920, 480, 3840);
+      var pixelRatio = Math.min(window.devicePixelRatio || 1, Config.num('viewport.maxPixelRatio', 2, 1, 3));
+      var shrink     = Math.min(1, maxWidth / (cssWidth * pixelRatio));
+
+      width  = Math.round(cssWidth  * pixelRatio * shrink);
+      height = Math.round(cssHeight * pixelRatio * shrink);
+
+      canvas.style.width  = cssWidth  + 'px';
+      canvas.style.height = cssHeight + 'px';
+
+      reset();
     }
 
     //=========================================================================
-    // TWEAK UI HANDLERS
+    // CAR COLOR - recolour the car artwork once, at boot
     //=========================================================================
 
-    Dom.on('resolution', 'change', function(ev) {
-      var w, h, ratio;
-      switch(ev.target.options[ev.target.selectedIndex].value) {
-        case 'fine':   w = 1280; h = 960;  ratio=w/width; break;
-        case 'high':   w = 1024; h = 768;  ratio=w/width; break;
-        case 'medium': w = 640;  h = 480;  ratio=w/width; break;
-        case 'low':    w = 480;  h = 360;  ratio=w/width; break;
+    // The car is drawn in red. We build a recoloured copy of each of its sprites
+    // in an offscreen canvas at startup and let the renderer use that instead.
+    // We never read pixels back, because on a file:// page that throws.
+    function tintSprites() {
+
+      var hue        = Config.num('player.hue',        0, 0,   360);
+      var saturate   = Config.num('player.saturate',   1, 0,   2);
+      var brightness = Config.num('player.brightness', 1, 0.3, 2);
+
+      if ((hue === 0) && (saturate === 1) && (brightness === 1))
+        return;                             // nothing to do, use the sheet exactly as it is
+
+      var filter    = 'hue-rotate(' + hue + 'deg) saturate(' + saturate + ') brightness(' + brightness + ')';
+      var wash      = 'hsl(' + hue + ', 90%, 50%)';
+      var canFilter = ('filter' in ctx);    // Safari does not support ctx.filter yet
+
+      var artwork = [SPRITES.PLAYER_LEFT,  SPRITES.PLAYER_STRAIGHT,  SPRITES.PLAYER_RIGHT,
+                     SPRITES.PLAYER_UPHILL_LEFT, SPRITES.PLAYER_UPHILL_STRAIGHT, SPRITES.PLAYER_UPHILL_RIGHT];
+
+      for (var n = 0 ; n < artwork.length ; n++) {
+
+        var sprite = artwork[n];
+        var copy   = document.createElement('canvas');
+        copy.width  = sprite.w;
+        copy.height = sprite.h;
+
+        var g = copy.getContext('2d');
+        if (canFilter) {
+          g.filter = filter;
+          g.drawImage(sprites, sprite.x, sprite.y, sprite.w, sprite.h, 0, 0, sprite.w, sprite.h);
+        }
+        else {                              // approximate: wash a colour over the car only
+          g.drawImage(sprites, sprite.x, sprite.y, sprite.w, sprite.h, 0, 0, sprite.w, sprite.h);
+          g.globalCompositeOperation = 'source-atop';
+          g.globalAlpha = 0.55;
+          g.fillStyle   = wash;
+          g.fillRect(0, 0, sprite.w, sprite.h);
+        }
+
+        sprite.tint = copy;
       }
-      reset({ width: w, height: h })
-      Dom.blur(ev);
-    });
+    }
 
-    Dom.on('lanes',          'change', function(ev) { Dom.blur(ev); reset({ lanes:         ev.target.options[ev.target.selectedIndex].value }); });
-    Dom.on('roadWidth',      'change', function(ev) { Dom.blur(ev); reset({ roadWidth:     Util.limit(Util.toInt(ev.target.value), Util.toInt(ev.target.getAttribute('min')), Util.toInt(ev.target.getAttribute('max'))) }); });
-    Dom.on('cameraHeight',   'change', function(ev) { Dom.blur(ev); reset({ cameraHeight:  Util.limit(Util.toInt(ev.target.value), Util.toInt(ev.target.getAttribute('min')), Util.toInt(ev.target.getAttribute('max'))) }); });
-    Dom.on('drawDistance',   'change', function(ev) { Dom.blur(ev); reset({ drawDistance:  Util.limit(Util.toInt(ev.target.value), Util.toInt(ev.target.getAttribute('min')), Util.toInt(ev.target.getAttribute('max'))) }); });
-    Dom.on('fieldOfView',    'change', function(ev) { Dom.blur(ev); reset({ fieldOfView:   Util.limit(Util.toInt(ev.target.value), Util.toInt(ev.target.getAttribute('min')), Util.toInt(ev.target.getAttribute('max'))) }); });
-    Dom.on('fogDensity',     'change', function(ev) { Dom.blur(ev); reset({ fogDensity:    Util.limit(Util.toInt(ev.target.value), Util.toInt(ev.target.getAttribute('min')), Util.toInt(ev.target.getAttribute('max'))) }); });
+    //=========================================================================
+    // WHICH IMAGES TO LOAD
+    //=========================================================================
 
-    function refreshTweakUI() {
-      Dom.get('lanes').selectedIndex = lanes-1;
-      Dom.get('currentRoadWidth').innerHTML      = Dom.get('roadWidth').value      = roadWidth;
-      Dom.get('currentCameraHeight').innerHTML   = Dom.get('cameraHeight').value   = cameraHeight;
-      Dom.get('currentDrawDistance').innerHTML   = Dom.get('drawDistance').value   = drawDistance;
-      Dom.get('currentFieldOfView').innerHTML    = Dom.get('fieldOfView').value    = fieldOfView;
-      Dom.get('currentFogDensity').innerHTML     = Dom.get('fogDensity').value     = fogDensity;
+    function imageNamesFromConfig() {
+      var names = [Config.str('background.image', 'background'), 'sprites'];
+      for (var n = 0 ; n < backgroundLayers.length ; n++)
+        if (names.indexOf(backgroundLayers[n].imageName) < 0)
+          names.push(backgroundLayers[n].imageName);
+      return names;
+    }
+
+    //=========================================================================
+    // RESET - called once at boot, and again on every window resize
+    //=========================================================================
+
+    function reset() {
+      cameraDepth   = 1 / Math.tan((fieldOfView/2) * Math.PI/180);
+      playerZ       = (cameraHeight * cameraDepth);
+      resolution    = height/480;   // scales the background parallax and the car's bounce
+      canvas.width  = width;
+      canvas.height = height;
+
+      if (segments.length == 0)
+        resetRoad();  // only build the road once: rebuilding would move every tree and rival
     }
 
     //=========================================================================

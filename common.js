@@ -25,7 +25,17 @@ var Dom = {
     ele.className = classes.join(' ');
   },
 
-  storage: window.localStorage || {}
+  // localStorage throws on a file:// page in some browsers, which would kill the
+  // whole script before it ever runs, so fall back to memory.
+  storage: (function() {
+    try {
+      window.localStorage.setItem('__test__', '1');
+      window.localStorage.removeItem('__test__');
+      return window.localStorage;
+    } catch (e) {
+      return {};
+    }
+  })()
 
 }
 
@@ -126,51 +136,79 @@ var Game = {  // a modified version of the game loop from my previous boulderdas
           update(step);
         }
         render();
-        stats.update();
+        if (stats) stats.update();
         last = now;
         requestAnimationFrame(frame, canvas);
       }
       frame(); // lets get this party started
-      Game.playMusic();
-    });
+      Game.playMusic(options.audio);
+    }, options.error);
   },
 
   //---------------------------------------------------------------------------
 
-  loadImages: function(names, callback) { // load multiple images and callback when ALL images have loaded
+  loadImages: function(names, callback, onerror) { // load multiple images and callback when ALL images have loaded
     var result = [];
     var count  = names.length;
+    var failed = [];
+
+    var done = function() {
+      if (failed.length > 0) {
+        if (onerror)
+          onerror(failed);
+        return;
+      }
+      callback(result);
+    };
 
     var onload = function() {
       if (--count == 0)
-        callback(result);
+        done();
+    };
+
+    var onfail = function(name) {
+      return function() {
+        failed.push(name);
+        if (--count == 0)
+          done();
+      };
     };
 
     for(var n = 0 ; n < names.length ; n++) {
       var name = names[n];
       result[n] = document.createElement('img');
-      Dom.on(result[n], 'load', onload);
-      result[n].src = "images/" + name + ".png";
+      Dom.on(result[n], 'load',  onload);
+      Dom.on(result[n], 'error', onfail(name));
+      // "sprites" means images/sprites.png; anything with a directory in it is
+      // taken as a real path, e.g. "images/backgrounds/desert.png"
+      result[n].src = (name.indexOf('/') >= 0) ? name : "images/" + name + ".png";
     }
+
+    if (count == 0)  // nothing to load at all
+      callback(result);
   },
 
   //---------------------------------------------------------------------------
 
   setKeyListener: function(keys) {
     var onkey = function(keyCode, mode) {
-      var n, k;
+      var n, k, handled = false;
       for(n = 0 ; n < keys.length ; n++) {
         k = keys[n];
         k.mode = k.mode || 'up';
         if ((k.key == keyCode) || (k.keys && (k.keys.indexOf(keyCode) >= 0))) {
+          handled = true;
           if (k.mode == mode) {
             k.action.call();
           }
         }
       }
+      return handled;
     };
-    Dom.on(document, 'keydown', function(ev) { onkey(ev.keyCode, 'down'); } );
-    Dom.on(document, 'keyup',   function(ev) { onkey(ev.keyCode, 'up');   } );
+    // preventDefault stops the arrow keys scrolling the page when we are not
+    // in fullscreen
+    Dom.on(document, 'keydown', function(ev) { if (onkey(ev.keyCode, 'down')) ev.preventDefault(); } );
+    Dom.on(document, 'keyup',   function(ev) { if (onkey(ev.keyCode, 'up'))   ev.preventDefault(); } );
   },
 
   //---------------------------------------------------------------------------
@@ -203,16 +241,46 @@ var Game = {  // a modified version of the game loop from my previous boulderdas
 
   //---------------------------------------------------------------------------
 
-  playMusic: function() {
+  playMusic: function(options) {
+
+    options = options || {};
+
     var music = Dom.get('music');
-    music.loop = true;
-    music.volume = 0.05; // shhhh! annoying music!
-    music.muted = (Dom.storage.muted === "true");
-    music.play();
-    Dom.toggleClassName('mute', 'on', music.muted);
-    Dom.on('mute', 'click', function() {
+    if (!music)
+      return;
+
+    var enabled = (options.enabled === undefined) ? true : options.enabled;
+    var mute    = Dom.get('mute');
+
+    if (!enabled) {
+      if (mute) mute.style.display = 'none';
+      return;
+    }
+
+    var sources = options.src || [];
+    for(var n = 0 ; n < sources.length ; n++) {
+      var source = document.createElement('source');
+      source.src = sources[n];
+      music.appendChild(source);
+    }
+
+    music.loop   = (options.loop   === undefined) ? true  : options.loop;
+    music.volume = (options.volume === undefined) ? 0.05  : options.volume; // shhhh! annoying music!
+    music.muted  = (Dom.storage.muted === "true");
+
+    // the browser will refuse to start audio until the user has interacted with
+    // the page, so a failure here is normal and not worth reporting
+    var playing = music.play();
+    if (playing && playing.catch)
+      playing.catch(function() {});
+
+    if (!mute)
+      return;
+
+    Dom.toggleClassName(mute, 'on', music.muted);
+    Dom.on(mute, 'click', function() {
       Dom.storage.muted = music.muted = !music.muted;
-      Dom.toggleClassName('mute', 'on', music.muted);
+      Dom.toggleClassName(mute, 'on', music.muted);
     });
   }
 
@@ -266,10 +334,15 @@ var Render = {
 
   //---------------------------------------------------------------------------
 
-  background: function(ctx, background, width, height, layer, rotation, offset) {
+  background: function(ctx, background, width, height, layer, rotation, offset, wrap) {
 
     rotation = rotation || 0;
     offset   = offset   || 0;
+
+    if (wrap === false) { // a plain picture, not a sheet of two tiles side by side - just stretch it
+      ctx.drawImage(background, layer.x, layer.y, layer.w, layer.h, 0, offset, width, height);
+      return;
+    }
 
     var imageW = layer.w/2;
     var imageH = layer.h;
@@ -301,8 +374,13 @@ var Render = {
     destY = destY + (destH * (offsetY || 0));
 
     var clipH = clipY ? Math.max(0, destY+destH-clipY) : 0;
-    if (clipH < destH)
-      ctx.drawImage(sprites, sprite.x, sprite.y, sprite.w, sprite.h - (sprite.h*clipH/destH), destX, destY, destW, destH - clipH);
+    if (clipH < destH) {
+      // a sprite may carry a pre-recoloured copy of itself (see tintSprites in game.js)
+      var source = sprite.tint || sprites;
+      var sourceX = sprite.tint ? 0 : sprite.x;
+      var sourceY = sprite.tint ? 0 : sprite.y;
+      ctx.drawImage(source, sourceX, sourceY, sprite.w, sprite.h - (sprite.h*clipH/destH), destX, destY, destW, destH - clipH);
+    }
 
   },
 
