@@ -148,19 +148,25 @@ function showFatal(title, detail) {
   document.body.appendChild(box);
 }
 
-(function checkConfigLoaded() {
-  if (window.RACER_CONFIG !== undefined)
-    return;
-  var boot = window.__bootError;
-  var detail = 'config.js could not be loaded';
-  if (boot && boot.message)
-    detail = 'config.js line ' + boot.line + ': ' + boot.message;
-  detail += '. If you just resolved a merge conflict, look for a leftover <<<<<<<, ======= or >>>>>>> marker in the file.';
-  showFatal('config.js is broken', detail);
-})();
+// Did config.js actually run? If it has a syntax error the browser never
+// executes it, so there is nothing to read and nothing worth starting.
+var configLoaded = (window.RACER_CONFIG !== undefined);
+
+function explainConfigFailure() {
+  var boot   = window.__bootError;
+  var detail = '';
+  if (boot && boot.message && (boot.message !== 'Script error.'))
+    detail = boot.line ? 'config.js line ' + boot.line + ': ' + boot.message + '. '
+                       : boot.message + '. ';
+  else
+    detail = 'The browser will not say why for a file:// page. ';
+  showFatal('config.js could not be loaded', detail +
+    'Open config.js in an editor and look for a syntax error. The usual cause, by a long way, is a leftover merge ' +
+    'conflict marker - a line starting with <<<<<<<, ======= or >>>>>>> - or a missing comma at the end of a line.');
+}
 
 var cfg  = Config.raw;
-var DIFF = DIFFICULTY[Config.str('difficulty', 'normal')] || DIFFICULTY.normal;
+var DIFF = DIFFICULTY.normal;   // replaced in applyConfig
 
 //=============================================================================
 // GAME STATE
@@ -793,6 +799,7 @@ var DIFF = DIFFICULTY[Config.str('difficulty', 'normal')] || DIFFICULTY.normal;
 
     function applyConfig() {
 
+      DIFF      = DIFFICULTY[Config.str('difficulty', 'normal')] || DIFFICULTY.normal;
       intensity = Config.num('team.intensity', 1, 0.25, 3);
 
       // --- the track itself -------------------------------------------------
@@ -879,6 +886,38 @@ var DIFF = DIFFICULTY[Config.str('difficulty', 'normal')] || DIFFICULTY.normal;
         loop:    Config.bool('audio.loop', true),
         src:     Config.list('audio.src', [])
       };
+    }
+
+    // Checks that can only be made once the road has actually been built. These
+    // do not stop the game - they explain, in the red box, why it looks wrong.
+    function validateWorld() {
+
+      var problems = Config.missing;
+
+      // A track shorter than the draw distance makes the render loop wrap the
+      // segment array more than once, and the road comes out garbled.
+      if (segments.length < (drawDistance + 20))
+        problems.push('the track is only ' + segments.length + ' segments long but camera.drawDistance is ' + drawDistance +
+                      ' - the road will look wrong. Add length to track.sections (each unit of length is 3 segments, so ' +
+                      '{ type: "straight", length: 50 } adds 150) or lower camera.drawDistance');
+
+      // The original guarantees you cannot cover a whole segment in one frame,
+      // which is what makes collisions detectable.
+      if ((maxSpeed / segmentLength) > (1/step))
+        problems.push('top speed is more than one road segment per frame, so the car can pass through a rival without hitting it - ' +
+                      'lower physics.maxSpeedScale, raise track.segmentLength, or set difficulty to something calmer');
+
+      if ((lanes > 1) && (COLORS.LIGHT.lane === null) && (COLORS.DARK.lane === null))
+        problems.push('track.lanes is ' + lanes + ' but both lane colours are null, so no lane markers are drawn - ' +
+                      'give colors.road.light.lane a colour, or set track.lanes to 1');
+
+      if ((rivalCount > 0) && ((rivalCount / segments.length) > 0.25))
+        problems.push(rivalCount + ' rivals on a ' + segments.length + ' segment track is very crowded - they are placed at ' +
+                      'random positions, so they bunch up and the frame rate suffers. Lower rivals.count');
+
+      if ((fogDensity > 0) && (COLORS.FOG !== COLORS.SKY))
+        problems.push('note: colors.fog and colors.sky are different colours, which paints a visible band along the horizon. ' +
+                      'Set them equal for a seamless sky, or ignore this if the band is the look you wanted');
     }
 
     function applyHudConfig() {
@@ -975,8 +1014,10 @@ var DIFF = DIFFICULTY[Config.str('difficulty', 'normal')] || DIFFICULTY.normal;
           reset();
           applyHudConfig();
 
-          Dom.storage.fast_lap_time = Dom.storage.fast_lap_time || 180;
+          validateWorld();
           showProblems();
+
+          Dom.storage.fast_lap_time = Dom.storage.fast_lap_time || 180;
           updateHud('fast_lap_time', formatTime(Util.toFloat(Dom.storage.fast_lap_time)));
         }
       });
@@ -1090,11 +1131,18 @@ var DIFF = DIFFICULTY[Config.str('difficulty', 'normal')] || DIFFICULTY.normal;
     // BOOT - read the config, show the title card, wait for one click
     //=========================================================================
 
-    applyConfig();
-    fillTitleCard();
-    preloadImages();
-    startFps();
-    wireStart();
+    // Nothing below this point is worth doing if config.js never ran: every
+    // value would be a default, and we would rather explain than pretend.
+    if (configLoaded) {
+      applyConfig();
+      fillTitleCard();
+      preloadImages();
+      startFps();
+      wireStart();
+    }
+    else {
+      explainConfigFailure();
+    }
 
     function fillTitleCard() {
 
