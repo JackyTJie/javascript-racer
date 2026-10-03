@@ -1,18 +1,39 @@
-<!DOCTYPE html> 
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <title>Javascript Racer</title>
-  <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
-</head> 
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>JavaScript Racer</title>
+  <link href="style.css" rel="stylesheet"/>
+</head>
+<body>
 
-<body> 
+  <canvas id="canvas">Sorry, this game needs a browser with &lt;canvas&gt; support.</canvas>
 
-  <ul>
-    <li><a href='v1.straight.html'>Version 1 - Straight</a></li>
-    <li><a href='v2.curves.html'>Version 2 - Curves</a></li>
-    <li><a href='v3.hills.html'>Version 3 - Hills</a></li>
-    <li><a href='v4.final.html'>Version 4 - Final</a></li>
-  </ul>
+  <div id="hud">
+    <span id="speed"            class="hud"><span id="speed_value" class="value">0</span> <span id="speed_unit">mph</span></span>
+    <span id="current_lap_time" class="hud">Time: <span id="current_lap_time_value" class="value">0.0</span></span>
+    <span id="last_lap_time"    class="hud">Last Lap: <span id="last_lap_time_value" class="value">0.0</span></span>
+    <span id="fast_lap_time"    class="hud">Fastest Lap: <span id="fast_lap_time_value" class="value">0.0</span></span>
+  </div>
 
-</body> 
+  <span id="mute" title="Mute the music"></span>
+
+  <div id="overlay">
+    <h1 id="title">JavaScript Racer</h1>
+    <p id="authors"></p>
+    <p class="keys">Arrow keys, or W A S D, to drive</p>
+    <p class="go">Click to start</p>
+    <p class="sub">Everything you can change lives in config.js</p>
+  </div>
+
+  <audio id="music" loop></audio>
+
+  <!-- catches a config.js that fails to parse, so we can say so on screen -->
+  <script>window.onerror=function(m,s,l){window.__bootError={message:m,file:s,line:l};};</script>
+  <script src="config.js"></script>
+  <script src="common.js"></script>
+  <script src="game.js"></script>
+
+</body>
 </html>

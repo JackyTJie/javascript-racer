@@ -316,7 +316,7 @@ var DIFF = DIFFICULTY[Config.str('difficulty', 'normal')] || DIFFICULTY.normal;
           updateHud('last_lap_time', formatTime(lastLapTime));
           if (hudConfig.showLastLap) {
             var lastLap = Dom.get('last_lap_time');
-            if (lastLap) lastLap.style.display = 'block';
+            if (lastLap) lastLap.style.display = '';
           }
         }
         else {
@@ -895,57 +895,92 @@ var DIFF = DIFFICULTY[Config.str('difficulty', 'normal')] || DIFFICULTY.normal;
       };
       for (var key in visible) {
         var item = hud[key];
+        // '' rather than 'block': the stylesheet lays the readouts out inline,
+        // and an inline display:block would stretch each one across the screen
         if (item && item.dom && item.dom.parentNode)
-          item.dom.parentNode.style.display = visible[key] ? 'block' : 'none';
+          item.dom.parentNode.style.display = visible[key] ? '' : 'none';
       }
+      var unit = Dom.get('speed_unit');
+      if (unit)
+        unit.innerHTML = escapeHtml(hudConfig.speedUnit);
     }
+
+    //=========================================================================
+    // FULLSCREEN
+    //=========================================================================
+
+    // Browsers only allow fullscreen, and sound, from inside a click. We ask for
+    // it as the very first thing in the click handler, before anything slow.
+    var Fullscreen = {
+
+      request: function(element) {
+        var fn = element.requestFullscreen || element.webkitRequestFullscreen || element.msRequestFullscreen;
+        if (!fn)
+          return;                                   // e.g. an iPhone: the page already fills the screen
+        try {
+          var result = fn.call(element);
+          if (result && result.catch)
+            result.catch(function() {});            // refused, blocked, or the user said no - all fine
+        } catch (e) {}
+      },
+
+      onChange: function(callback) {
+        document.addEventListener('fullscreenchange',      callback, false);
+        document.addEventListener('webkitfullscreenchange', callback, false);
+      },
+
+      isActive: function() {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement);
+      }
+
+    };
 
     //=========================================================================
     // THE GAME LOOP
     //=========================================================================
 
-    applyConfig();
+    function startGame() {
+      Game.run({
+        canvas: canvas, render: render, update: update, stats: stats, step: step,
+        images: imageNamesFromConfig(),
+        audio:  audioConfig,
+        error:  function(failed) {
+          showFatal('Missing image', 'Could not load: ' + failed.join(', ') + '. Check the image names in config.js.');
+        },
+        keys: [
+          { keys: [KEY.LEFT,  KEY.A], mode: 'down', action: function() { keyLeft   = true;  } },
+          { keys: [KEY.RIGHT, KEY.D], mode: 'down', action: function() { keyRight  = true;  } },
+          { keys: [KEY.UP,    KEY.W], mode: 'down', action: function() { keyFaster = true;  } },
+          { keys: [KEY.DOWN,  KEY.S], mode: 'down', action: function() { keySlower = true;  } },
+          { keys: [KEY.LEFT,  KEY.A], mode: 'up',   action: function() { keyLeft   = false; } },
+          { keys: [KEY.RIGHT, KEY.D], mode: 'up',   action: function() { keyRight  = false; } },
+          { keys: [KEY.UP,    KEY.W], mode: 'up',   action: function() { keyFaster = false; } },
+          { keys: [KEY.DOWN,  KEY.S], mode: 'up',   action: function() { keySlower = false; } }
+        ],
+        ready: function(images) {
 
-    Game.run({
-      canvas: canvas, render: render, update: update, stats: stats, step: step,
-      images: imageNamesFromConfig(),
-      audio:  audioConfig,
-      error:  function(failed) {
-        showFatal('Missing image', 'Could not load: ' + failed.join(', ') + '. Check the image names in config.js.');
-      },
-      keys: [
-        { keys: [KEY.LEFT,  KEY.A], mode: 'down', action: function() { keyLeft   = true;  } },
-        { keys: [KEY.RIGHT, KEY.D], mode: 'down', action: function() { keyRight  = true;  } },
-        { keys: [KEY.UP,    KEY.W], mode: 'down', action: function() { keyFaster = true;  } },
-        { keys: [KEY.DOWN,  KEY.S], mode: 'down', action: function() { keySlower = true;  } },
-        { keys: [KEY.LEFT,  KEY.A], mode: 'up',   action: function() { keyLeft   = false; } },
-        { keys: [KEY.RIGHT, KEY.D], mode: 'up',   action: function() { keyRight  = false; } },
-        { keys: [KEY.UP,    KEY.W], mode: 'up',   action: function() { keyFaster = false; } },
-        { keys: [KEY.DOWN,  KEY.S], mode: 'up',   action: function() { keySlower = false; } }
-      ],
-      ready: function(images) {
+          var names  = imageNamesFromConfig();
+          var byName = {};
+          for (var n = 0 ; n < names.length ; n++)
+            byName[names[n]] = images[n];
 
-        var names  = imageNamesFromConfig();
-        var byName = {};
-        for (var n = 0 ; n < names.length ; n++)
-          byName[names[n]] = images[n];
+          background = byName[Config.str('background.image', 'background')];
+          sprites    = byName['sprites'];
 
-        background = byName[Config.str('background.image', 'background')];
-        sprites    = byName['sprites'];
+          for (var l = 0 ; l < backgroundLayers.length ; l++)
+            backgroundLayers[l].image = byName[backgroundLayers[l].imageName] || background;
 
-        for (var l = 0 ; l < backgroundLayers.length ; l++)
-          backgroundLayers[l].image = byName[backgroundLayers[l].imageName] || background;
+          tintSprites();
 
-        tintSprites();
+          reset();
+          applyHudConfig();
 
-        reset();
-        applyHudConfig();
-
-        Dom.storage.fast_lap_time = Dom.storage.fast_lap_time || 180;
-        showProblems();
-        updateHud('fast_lap_time', formatTime(Util.toFloat(Dom.storage.fast_lap_time)));
-      }
-    });
+          Dom.storage.fast_lap_time = Dom.storage.fast_lap_time || 180;
+          showProblems();
+          updateHud('fast_lap_time', formatTime(Util.toFloat(Dom.storage.fast_lap_time)));
+        }
+      });
+    }
 
     //=========================================================================
     // SIZING - fill the screen, and stay sharp on a high-DPI display
@@ -1050,3 +1085,103 @@ var DIFF = DIFFICULTY[Config.str('difficulty', 'normal')] || DIFFICULTY.normal;
 
     //=========================================================================
 
+
+    //=========================================================================
+    // BOOT - read the config, show the title card, wait for one click
+    //=========================================================================
+
+    applyConfig();
+    fillTitleCard();
+    preloadImages();
+    startFps();
+    wireStart();
+
+    function fillTitleCard() {
+
+      var title = Config.str('team.title', 'JavaScript Racer');
+      document.title = title;
+      if (Dom.get('title'))
+        Dom.get('title').innerHTML = escapeHtml(title);
+
+      var authors = Dom.get('authors');
+      var who     = Config.list('team.authors', []);
+      if (authors && (who.length > 0))
+        authors.innerHTML = who.map(escapeHtml).join('\n');
+    }
+
+    function preloadImages() {
+      // warm the browser cache while the player is reading the title card,
+      // so that the click feels instant. Failures are reported by startGame.
+      Game.loadImages(imageNamesFromConfig(), function() {}, function() {});
+    }
+
+    function wireStart() {
+
+      var overlay = Dom.get('overlay');
+      var started = false;
+
+      var start = function() {
+        if (started)
+          return;
+        started = true;
+
+        Fullscreen.request(document.documentElement);   // has to happen inside the click
+        if (overlay)
+          overlay.style.display = 'none';
+
+        window.addEventListener('resize',            onResize, false);
+        window.addEventListener('orientationchange', onResize, false);
+        Fullscreen.onChange(onResize);
+
+        resize();      // sizes the canvas and builds the road
+        startGame();   // loads the images, then runs
+      };
+
+      if (!overlay) {  // a page without a title card just starts
+        start();
+        return;
+      }
+
+      Dom.on(overlay, 'click', start);
+      Dom.on(document, 'keydown', function(ev) {
+        if (!started && ((ev.keyCode === 13) || (ev.keyCode === 32)))
+          start();
+      });
+    }
+
+    var resizePending = false;
+
+    function onResize() {
+      if (resizePending)
+        return;
+      resizePending = true;
+      requestAnimationFrame(function() {   // dragging a window fires this hundreds of times
+        resizePending = false;
+        resize();
+      });
+    }
+
+    function startFps() {
+
+      if (!Config.bool('debug.showFps', false))
+        return;
+
+      var box = document.createElement('div');
+      box.id = 'fps';
+      document.body.appendChild(box);
+
+      var frames = 0;
+      var last   = Util.timestamp();
+
+      var tick = function() {
+        frames++;
+        var now = Util.timestamp();
+        if ((now - last) >= 500) {
+          box.innerHTML = Math.round(1000 * frames / (now - last)) + ' fps';
+          frames = 0;
+          last   = now;
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
