@@ -146,9 +146,9 @@ window.RACER_CONFIG = {
     //          forever. A plain photo is not doubled, so set wrap: false and it
     //          will be stretched across the screen instead.
     layers: [
-      { slice: 'SKY',     speed: 0.001 },
-      { slice: 'HILLS',   speed: 0.002 },
-      { slice: 'TREES',   speed: 0.003 },
+      // { slice: 'SKY',   speed: 0.001 },
+      // { slice: 'HILLS', speed: 0.002 },
+      // { slice: 'TREES', speed: 0.003 },
     ],
   },
 
@@ -180,8 +180,9 @@ window.RACER_CONFIG = {
     // 'blank'    = one long straight road and nothing else - the workshop start
     // 'sections' = build the track from the `sections` list below. The list as
     //              shipped reproduces the original track exactly, so this is
-    //              also how you get the original track back.
-    preset:                'sections',
+    //              also how you get the original track back: change this one
+    //              word and you have a real race track again.
+    preset:                'blank',
 
     // Each section is one line, so two people editing different parts of the
     // track get a small, readable conflict rather than a mess. Delete a line to
@@ -247,7 +248,7 @@ window.RACER_CONFIG = {
   scenery: {
     // The master switch for roadside objects. 0 = a completely empty roadside.
     // 1 = the normal amount, 2 = twice as busy. 0-5
-    density:              1.0,
+    density:              0.0,
 
     // Per-category multipliers on top of `density`. 0 removes that category
     // entirely. 0-5
@@ -263,7 +264,7 @@ window.RACER_CONFIG = {
   // --------------------------------------------------------------------------
   rivals: {
     // How many cars share the track with you. 0 = an empty road. 0-1000
-    count:                200,
+    count:                0,
 
     // How far ahead a rival looks before deciding to swerve around something.
     // Small = twitchy drivers, large = smoother but slower. 5-60
@@ -341,7 +342,7 @@ window.RACER_CONFIG = {
   fog: {
     // 0 = perfectly clear, you can see the whole draw distance.
     // 5 = the original hazy horizon. 30 = you cannot see the next corner. 0-30
-    density:              5,
+    density:              0,
   },
 
 
