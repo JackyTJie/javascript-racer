@@ -1,6 +1,5 @@
 # Git workshop: build a game one commit at a time
 
-**Duration** 1.5 hours for the core exercises (1–6), about 3 hours for all ten.
 **Group size** 3–4 per group, each person taking one role.
 **Prerequisites** `git` installed, a browser, and the shell basics from the
 lecture: `cd`, `ls`, `mkdir`, `cp`, `mv`, `rm`.
@@ -80,7 +79,7 @@ the conversation, not the keystrokes.
 
 ## The exercises
 
-### 1. Warm-up — your name on the title card *(20 min)*
+### 1. Warm-up — your name on the title card
 
 Put your name in `config.js`, and see where it ends up.
 
@@ -104,7 +103,7 @@ git show                         # same thing, with the commit message
 The second person to commit will have to deal with the first person's line
 already being there. That is exercise 4 arriving early - do not skip it.
 
-### 2. How the car drives *(20 min)*
+### 2. How the car drives
 
 ```sh
 git switch -c feature/drive-feel
@@ -127,7 +126,7 @@ git switch feature/drive-feel
 git branch --list
 ```
 
-### 3. Repaint the car *(20 min)*
+### 3. Repaint the car
 
 Still on a branch. Change `player.hue`, `saturate` and `brightness` and watch the
 car change colour. Try 240, then 120, then 30.
@@ -148,7 +147,7 @@ git restore --staged config.js   # put it back in the working directory
 
 Then commit the colour you actually want.
 
-### 4. Landscape it *(25 min)*
+### 4. Landscape it
 
 ```sh
 git switch -c feature/scenery
@@ -178,7 +177,7 @@ to build a merge commit:
 git log --graph --oneline --all
 ```
 
-### 5. Build a track *(30 min)*
+### 5. Build a track
 
 ```sh
 git switch -c feature/track
@@ -210,7 +209,7 @@ unless you have a reason not to.
 > game will tell you the two numbers and what to do about it. That message is
 > worth reading once; it is the same arithmetic you need for the exercise.
 
-### 6. Traffic and weather *(30 min)*
+### 6. Traffic and weather
 
 ```sh
 git switch -c feature/traffic
@@ -228,7 +227,7 @@ git switch master
 git merge feature/traffic
 ```
 
-### 7. The undo lab *(20 min)*
+### 7. The undo lab
 
 Deliberately break things, then fix them with git rather than with your editor.
 Run each of these once so that you have done it before you need it.
@@ -260,7 +259,7 @@ git log --oneline
 `git reset --hard HEAD~1` throws the changes away as well. Know it exists, and be
 careful with it.
 
-### 8. Collaborate *(25 min)*
+### 8. Collaborate
 
 Everyone pushes their branch - not just the merged result:
 
@@ -274,7 +273,7 @@ Open a pull request for each branch, review somebody else's, and merge it. The
 review question is not "is this good code" but "does this do what the commit
 message says, and does the game still run".
 
-### 9. Release *(10 min)*
+### 9. Release
 
 ```sh
 git tag v1.0 -m "workshop build"
@@ -285,7 +284,7 @@ git show v1.0 --stat
 Look at the graph you just made. Every branch, every merge, every conflict you
 resolved is in that picture.
 
-### 10. Who did this? *(15 min)*
+### 10. Who did this?
 
 Somebody set `fog.density` to 999 and the horizon is gone. Do not read the file -
 ask git.
